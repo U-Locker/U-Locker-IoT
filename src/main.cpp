@@ -14,22 +14,31 @@
 #include <WiFiManager.h>
 #include <WiFi.h>
 
+// PubSubClient
+#include <PubSubClient.h>
+
 // Constants
 #include <constants.h>
 
-// Websocket Client
-#include <ArduinoWebsockets.h>
+WiFiClient wifi;
+PubSubClient client(wifi);
+
+unsigned long lastMsg = 0;
+#define MSG_BUFFER_SIZE (50)
+char msg[MSG_BUFFER_SIZE];
+int value = 0;
 
 // declare the lcd object for auto i2c address location
 hd44780_I2Clcd lcd;
+
+// NFC Reader
 PN532_SPI pn532spi(SPI, NFC_NSS);
 PN532 nfc(pn532spi);
 
 WiFiManager wm;
-websockets::WebsocketsClient ws;
 
 // NFC variables
-boolean isNFCReading = false;
+// boolean isNFCReading = false;
 uint8_t uid[] = {0, 0, 0, 0, 0, 0, 0};
 uint8_t prevUid[] = {0, 0, 0, 0, 0, 0, 0};
 uint8_t uidLength;
@@ -43,6 +52,8 @@ uint8_t doorPin[] = {
 
 int8_t lastDoorUnlock = -1;
 uint32_t lastDoorUnlockTime = 0;
+
+bool readNFCSuccess = false;
 
 // prototype
 void IRAM_ATTR ISR();
@@ -76,7 +87,7 @@ bool isMessageValid(String message)
 
   // split the message by # and check if machine id is the same
   String machineId = message.substring(0, 14);
-  if (machineId != MACHINE_ID)
+  if (machineId != String(MACHINE_ID))
   {
     return false;
   }
@@ -84,27 +95,42 @@ bool isMessageValid(String message)
   return true;
 }
 
-void onMessageCallback(websockets::WebsocketsMessage message)
+void onMessageCallback(char *topic, byte *payload, uint16_t length)
 {
-  Serial.print("Got Message: ");
 
-  String data = message.data();
-  Serial.print("[WS]: Got Message: ");
+  // convert c string to String
+  String data = "";
+  for (int i = 0; i < length; i++)
+  {
+    data += (char)payload[i];
+  }
+
+  Serial.print("[MQTT]: Got Message: ");
   Serial.println(data);
 
   if (!isMessageValid(data))
   {
-    Serial.println("[WS]: Invalid Message. Ignoring...");
+    Serial.println("[MQTT]: Invalid Message. Ignoring...");
     return;
   }
 
   String command = getValue(data, '#', 1);
   String value = getValue(data, '#', 2);
 
+  Serial.println("[MQTT]: Command: " + command);
+  Serial.println("[MQTT]: Value: " + value);
+
   if (command == "NFC_READ")
   {
     // reset uid previous
     memset(prevUid, 0, sizeof(prevUid));
+
+    String message = MACHINE_ID;
+    message += "#NFC_READ#";
+    message += "OK";
+
+    // send ack
+    client.publish(MQTT_TOPIC_RESPONSE, message.c_str());
   }
 
   if (command == "OPEN_DOOR")
@@ -114,47 +140,80 @@ void onMessageCallback(websockets::WebsocketsMessage message)
     {
       lastDoorUnlock = doorIndex;
       lastDoorUnlockTime = millis();
-      digitalWrite(doorPin[doorIndex], HIGH);
+      digitalWrite(doorPin[doorIndex], LOW);
     }
+
+    // send the door status back to the server
+    String message = MACHINE_ID;
+    message += "#OPEN_DOOR#";
+    message += String(doorIndex);
+
+    client.publish(MQTT_TOPIC_RESPONSE, message.c_str());
   }
 
   if (command == "REBOOT")
   {
-    Serial.println("[WS]: Rebooting...");
+    Serial.println("[MQTT]: Rebooting...");
+
+    String message = MACHINE_ID;
+    message += "#REBOOT#";
+    message += "OK";
+
+    client.publish(MQTT_TOPIC_RESPONSE, message.c_str());
     ESP.restart();
   }
 
   if (command == "FREE_MEM")
   {
-    Serial.print("[WS]: Free Memory: ");
+    Serial.print("[MQTT]: Free Memory: ");
     Serial.println(ESP.getFreeHeap());
 
     // send the free memory back to the server
     String message = MACHINE_ID;
     message += "#FREE_MEM#";
     message += String(ESP.getFreeHeap());
+
+    client.publish(MQTT_TOPIC_RESPONSE, message.c_str());
   }
 
   // add commands here
 }
 
-void onEventsCallback(websockets::WebsocketsEvent event, String data)
+void reconnect()
 {
-  if (event == websockets::WebsocketsEvent::ConnectionOpened)
+  while (!client.connected())
   {
-    Serial.println("[WS]: Connnection Opened");
-  }
-  else if (event == websockets::WebsocketsEvent::ConnectionClosed)
-  {
-    Serial.println("[WS]: Connnection Closed");
-  }
-  else if (event == websockets::WebsocketsEvent::GotPing)
-  {
-    Serial.println("[WS]: Got a Ping!");
-  }
-  else if (event == websockets::WebsocketsEvent::GotPong)
-  {
-    Serial.println("[WS]: Got a Pong!");
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "Locker-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect(clientId.c_str()))
+    {
+      Serial.println("connected");
+      client.subscribe(MQTT_TOPIC_COMMAND);
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+
+    // check wifi connector
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      Serial.println(F("[WiFi]: WiFi Disconnected. Reconnecting..."));
+      wm.autoConnect("U-Locker IoT");
+
+      // check if wifi is connected
+      if (WiFi.status() == WL_CONNECTED)
+      {
+        Serial.println(F("[WiFi]: Connected to WiFi"));
+      }
+    }
   }
 }
 
@@ -177,6 +236,7 @@ void setup()
     // hd44780::fatalError(status);
   }
 
+  // PAEL BELE NFC KITA GA DI DIBAWA
   // begin NFC reader
   nfc.begin();
   nfc.SAMConfig();
@@ -205,9 +265,9 @@ void setup()
 
   // setup NFC IRQ
 
-  Serial.println(F("[SYSTEM]: Initializing NFC IRQ..."));
-  pinMode(NFC_IRQ, INPUT_PULLDOWN);
-  attachInterrupt(NFC_IRQ, ISR, RISING);
+  // Serial.println(F("[SYSTEM]: Initializing NFC IRQ..."));
+  // pinMode(NFC_IRQ, INPUT_PULLDOWN);
+  // attachInterrupt(NFC_IRQ, ISR, RISING);
 
   // setup PINS for door lock
 
@@ -216,7 +276,7 @@ void setup()
   for (int i = 0; i < sizeof(doorPin); i++)
   {
     pinMode(doorPin[i], OUTPUT);
-    digitalWrite(doorPin[i], LOW);
+    digitalWrite(doorPin[i], HIGH);
   }
 
   // WiFi setup
@@ -242,24 +302,9 @@ void setup()
     Serial.println(F("[WiFi]: Connected to WiFi"));
   }
 
-  // websocket setup
-  Serial.println(F("[SYSTEM]: Initializing Websocket Client..."));
-  ws.onMessage(onMessageCallback);
-  ws.onEvent(onEventsCallback);
-
-  while (!ws.connect(WS_HOST, WS_PORT, WS_PATH))
-  {
-
-    // check if wifi is still connected
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      Serial.println(F("[WS]: WiFi Disconnected. Reconnecting..."));
-      wm.autoConnect("U-Locker IoT");
-    }
-
-    Serial.println(F("[WS]: Connection failed. Retrying..."));
-    delay(1000);
-  }
+  Serial.println(F("[SYSTEM]: Setting up MQTT client..."));
+  client.setServer(MQTT_SERVER, MQTT_PORT);
+  client.setCallback(onMessageCallback);
 
   // setup done
   Serial.println(F("[SYSTEM]: Setup done."));
@@ -268,73 +313,80 @@ void setup()
 void loop(void)
 {
 
-  if (isNFCReading)
+  if (!client.connected())
   {
-    isNFCReading = false;
-
-    Serial.println(F("[NFC]: Reading NFC Tag..."));
-
-    // reset uid buffer
-    memset(uid, 0, sizeof(uid));
-
-    bool success = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength);
-
-    if (success)
-    {
-      // check if the uid is the same as the previous one
-      if (memcmp(uid, prevUid, sizeof(uid)) == 0)
-      {
-        Serial.println(F("[NFC]: Same NFC Tag detected. Ignoring..."));
-        return;
-      }
-
-      // save the current uid to the previous uid
-      memcpy(prevUid, uid, sizeof(uid));
-
-      Serial.print(F("[NFC]: NFC Tag detected. UID Length: "));
-      Serial.print(uidLength, DEC);
-      Serial.print(F(", UID Value: "));
-      for (uint8_t i = 0; i < uidLength; i++)
-      {
-        Serial.print(" 0x");
-        Serial.print(uid[i], HEX);
-      }
-
-      Serial.println();
-
-      // send the uid to the websocket server with this format MACHINE_CODE#NFC_READ#UID
-      String message = MACHINE_ID;
-      message += "#NFC_READ#";
-      for (uint8_t i = 0; i < uidLength; i++)
-      {
-        message += String(uid[i], HEX);
-      }
-    }
-    else
-    {
-      Serial.println(F("[NFC]: No NFC Tag found."));
-    }
+    reconnect();
   }
+
+  client.loop();
+
+  // if (isNFCReading)
+  // {
+  //   isNFCReading = false;
+
+  // Serial.println(F("[NFC]: Reading NFC Tag..."));
+
+  // // reset uid buffer
+  // memset(uid, 0, sizeof(uid));
+
+  readNFCSuccess = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength);
+
+  if (readNFCSuccess)
+  {
+    // check if the uid is the same as the previous one
+    if (memcmp(uid, prevUid, sizeof(uid)) == 0)
+    {
+      Serial.println(F("[NFC]: Same NFC Tag detected. Ignoring..."));
+      return;
+    }
+
+    // save the current uid to the previous uid
+    memcpy(prevUid, uid, sizeof(uid));
+
+    Serial.print(F("[NFC]: NFC Tag detected. UID Length: "));
+    Serial.print(uidLength, DEC);
+    Serial.print(F(", UID Value: "));
+    for (uint8_t i = 0; i < uidLength; i++)
+    {
+      Serial.print(" 0x");
+      Serial.print(uid[i], HEX);
+    }
+
+    Serial.println();
+
+    // send the uid to the websocket server with this format MACHINE_CODE#NFC_READ#UID
+    String message = MACHINE_ID;
+    message += "#NFC_READ#";
+    for (uint8_t i = 0; i < uidLength; i++)
+    {
+      message += String(uid[i], HEX);
+    }
+
+    client.publish(MQTT_TOPIC_RESPONSE, message.c_str());
+  }
+  // else
+  // {
+  //   Serial.println(F("[NFC]: No NFC Tag found."));
+  // }
+  // }
 
   // door unlock
   if (lastDoorUnlock != -1)
   {
     if (millis() - lastDoorUnlockTime > 5000)
     {
-      digitalWrite(doorPin[lastDoorUnlock], LOW);
+      digitalWrite(doorPin[lastDoorUnlock], HIGH);
       lastDoorUnlock = -1;
     }
   }
 
-  ws.poll();
-
   delay(10);
 }
 
-void IRAM_ATTR ISR()
-{
-  isNFCReading = true;
-}
+// void IRAM_ATTR ISR()
+// {
+//   isNFCReading = true;
+// }
 
 /*
   MACHINE_CODE#COMMAND#DATA

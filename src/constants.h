@@ -10,8 +10,8 @@
 #define LCD_COLS 20
 #define LCD_ROWS 4
 
-// websocket API
-#define WS_HOST "api.ulocker.com"
-#define WS_PORT 80
-#define WS_PATH "/embedded"
-#define WS_SECRET ""
+// MQTT API
+#define MQTT_SERVER "broker.hivemq.com"
+#define MQTT_PORT 1883
+#define MQTT_TOPIC_COMMAND "/u-locker/command"
+#define MQTT_TOPIC_RESPONSE "/u-locker/response"

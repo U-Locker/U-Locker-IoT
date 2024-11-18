@@ -1,19 +1,19 @@
 
 // PubSubClient
-#include <Arduino.h>
 #include <PubSubClient.h>
 #include <WiFiClient.h>
+#include <constants.h>
 
 class MQTTHandler
 {
 
 private:
     WiFiClient wifi;
-    PubSubClient client;
     const char *server;
     int port;
     const char *commandTopic;
     const char *responseTopic;
+    uint32_t lastHeartbeatSent = 0;
 
 public:
     /**
@@ -32,6 +32,9 @@ public:
      * @param commandTopic Topik untuk menerima perintah.
      * @param responseTopic Topik untuk mengirim respons.
      */
+
+    PubSubClient client;
+
     MQTTHandler(const char *server, int port, const char *commandTopic, const char *responseTopic)
     {
         this->server = server;
@@ -49,6 +52,8 @@ public:
     {
         client.setServer(server, port);
         client.setCallback(callback);
+
+        sendResponse("STARTUP", "");
     };
 
     /**
@@ -59,27 +64,27 @@ public:
      */
     void reconnect()
     {
-        while (!client.connected())
+        // while (!client.connected())
+        // {
+        Serial.print("Attempting MQTT connection...");
+        // Create a random client ID
+        String clientId = "Locker-";
+        clientId += String(random(0xffff), HEX);
+        // Attempt to connect
+        if (client.connect(clientId.c_str()))
         {
-            Serial.print("Attempting MQTT connection...");
-            // Create a random client ID
-            String clientId = "Locker-";
-            clientId += String(random(0xffff), HEX);
-            // Attempt to connect
-            if (client.connect(clientId.c_str()))
-            {
-                Serial.println("connected");
-                client.subscribe(this->commandTopic);
-            }
-            else
-            {
-                Serial.print("failed, rc=");
-                Serial.print(client.state());
-                Serial.println(" try again in 5 seconds");
-                // Wait 5 seconds before retrying
-                delay(5000);
-            }
+            Serial.println("connected");
+            client.subscribe(this->commandTopic);
         }
+        else
+        {
+            Serial.print("failed, rc=");
+            Serial.print(client.state());
+            Serial.println(" try again in 5 seconds");
+            // Wait 5 seconds before retrying
+            delay(5000);
+        }
+        // }
     };
 
     /**
@@ -96,6 +101,13 @@ public:
         }
 
         client.loop();
+
+        // send heartbeat to indicate that this device is still alive
+        if (millis() - lastHeartbeatSent >= MQTT_HEARTBEAT_INTERVAL)
+        {
+            sendResponse("HEARTBEAT", "");
+            lastHeartbeatSent = millis();
+        }
     };
 
     /**

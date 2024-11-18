@@ -8,14 +8,29 @@
 #include <constants.h>
 
 // modular libraries
-#include <DoorController/DoorController.h>
-#include <MQTT/MQTTHandler.h>
-#include <NFC/NFCHandler.h>
+#include <Peripheral/DoorController.h>
+#include <Inet/MQTTHandler.h>
+#include <Peripheral/NFCHandler.h>
+#include <Peripheral/Buzzer.h>
+#include <Peripheral/LCDController.h>
+
+#include <ArduinoJson.h>
 
 WiFiManager wm;
 DoorController doorHandler;
 MQTTHandler mqttHandler(MQTT_SERVER, MQTT_PORT, MQTT_TOPIC_COMMAND, MQTT_TOPIC_RESPONSE);
 NFCHandler nfcHandler;
+Buzzer buzzer;
+LCDController lcdScreen;
+
+JsonDocument doorState;
+/*
+  doorState type:
+  {
+    doorId: number
+    ktmUid: string
+  }[]
+*/
 
 void onMessageCallback(char *topic, byte *payload, uint16_t length)
 {
@@ -55,6 +70,9 @@ void onMessageCallback(char *topic, byte *payload, uint16_t length)
     int doorIndex = value.toInt();
     doorHandler.unlockDoor(doorIndex);
 
+    // play buzz
+    buzzer.playBeep(3);
+
     // sementara reset UID kalo pintu kebuka
     nfcHandler.resetUid();
 
@@ -78,6 +96,35 @@ void onMessageCallback(char *topic, byte *payload, uint16_t length)
 
     // send the free memory back to the server
     mqttHandler.sendResponse("FREE_MEM", String(ESP.getFreeHeap()));
+  }
+
+  if (command == "STATE")
+  {
+    Serial.println("[MQTT]: Saving state...");
+
+    // parse JSON doc
+    DeserializationError error = deserializeJson(doorState, value);
+    if (error)
+    {
+      Serial.print(F("[MQTT]: Failed to parse JSON: "));
+      Serial.println(error.c_str());
+    }
+
+    // send response
+    mqttHandler.sendResponse("STATE", "OK");
+  }
+
+  if (command == "LCD")
+  {
+
+    Serial.println("[MQTT]: Printing to LCD...");
+    Serial.println(value);
+
+    // print to LCD
+    lcdScreen.print(value);
+
+    // send response
+    mqttHandler.sendResponse("LCD", "OK");
   }
 
   // add commands here
@@ -106,6 +153,9 @@ void setup()
 
   // Door Controller Setup
   doorHandler.setup();
+
+  // setup buzzer
+  buzzer.setup();
 
   // WiFi setup
   Serial.println(F("[SYSTEM]: Initializing WiFi Manager..."));
@@ -139,15 +189,35 @@ void setup()
 
 void loop(void)
 {
-  // handle mqtt
-  mqttHandler.loop();
 
   // handle nfc
   String uid = nfcHandler.readNFC();
   if (uid != "")
   {
+    // play buzz
+    buzzer.playBeep(1);
+
     Serial.print("[NFC]: UID: ");
     Serial.println(uid);
+
+    // if disconnected from mqtt
+    if (!mqttHandler.client.connected())
+    {
+      // check from JSON state
+      for (int i = 0; i < doorState.size(); i++)
+      {
+        String ktmUid = doorState[i]["ktmUid"];
+        if (ktmUid == uid)
+        {
+          int doorId = doorState[i]["doorId"];
+          doorHandler.unlockDoor(doorId);
+          break;
+        }
+      }
+    }
+
+    // handle mqtt
+    mqttHandler.loop();
 
     // send response
     mqttHandler.sendResponse("NFC_READ", uid);
@@ -155,6 +225,9 @@ void loop(void)
 
   // handle door controller
   doorHandler.loop();
+
+  // LCD loop
+  lcdScreen.loop();
 
   // WDT: watchdog timer
   delay(10);

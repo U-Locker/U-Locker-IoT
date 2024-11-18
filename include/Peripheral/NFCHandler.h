@@ -1,6 +1,7 @@
 #include <PN532_SPI.h>
 #include <PN532.h>
 #include <constants.h>
+#include <Peripheral/Buzzer.h>
 
 PN532_SPI pn532spi(SPI, NFC_NSS);
 PN532 nfc(pn532spi);
@@ -32,6 +33,7 @@ public:
      */
     bool setup()
     {
+
         nfc.begin();
         uint32_t versiondata = nfc.getFirmwareVersion();
         if (!versiondata)
@@ -67,6 +69,7 @@ public:
         readNFCSuccess = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength);
         if (readNFCSuccess)
         {
+
             // check if the uid is the same as the previous one
             if (memcmp(uid, prevUid, sizeof(uid)) == 0)
             {

@@ -18,7 +18,6 @@
  * @var lastDoorUnlockTime
  * Array yang menyimpan waktu terakhir pintu dibuka.
  */
-
 class DoorController
 {
 private:
@@ -58,13 +57,10 @@ public:
     {
         for (int i = 0; i < sizeof(doorPin); i++)
         {
-            if (lastDoorUnlock[i] != -1)
+            if (lastDoorUnlock[i] != -1 && ((millis() - lastDoorUnlockTime[i]) > DOOR_TIMEOUT))
             {
-                if (millis() - lastDoorUnlockTime[i] > DOOR_TIMEOUT)
-                {
-                    digitalWrite(doorPin[lastDoorUnlock[i]], HIGH);
-                    lastDoorUnlock[i] = -1;
-                }
+                digitalWrite(doorPin[lastDoorUnlock[i]], HIGH);
+                lastDoorUnlock[i] = -1;
             }
         }
     }

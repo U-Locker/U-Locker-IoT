@@ -1,7 +1,6 @@
 #include <PN532_SPI.h>
 #include <PN532.h>
 #include <constants.h>
-#include <Peripheral/Buzzer.h>
 
 PN532_SPI pn532spi(SPI, NFC_NSS);
 PN532 nfc(pn532spi);
@@ -82,7 +81,7 @@ public:
             String uidStr = "";
             for (uint8_t i = 0; i < uidLength; i++)
             {
-                uidStr += " 0x";
+                // uidStr += " 0x";
                 uidStr += String(uid[i], HEX);
             }
 

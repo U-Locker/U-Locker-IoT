@@ -24,5 +24,5 @@
 
 // Buzzer
 #define BUZZER_PIN 33
-#define BUZZER_FREQ 2000
-#define BUZZER_DELAY 100
+#define BUZZER_FREQ 5000
+#define BUZZER_DELAY 150

@@ -4,11 +4,13 @@
 #include <WiFiClient.h>
 #include <constants.h>
 
+WiFiClient wifiClient;
+PubSubClient client(wifiClient);
+
 class MQTTHandler
 {
 
 private:
-    WiFiClient wifi;
     const char *server;
     int port;
     const char *commandTopic;
@@ -32,8 +34,6 @@ public:
      * @param commandTopic Topik untuk menerima perintah.
      * @param responseTopic Topik untuk mengirim respons.
      */
-
-    PubSubClient client;
 
     MQTTHandler(const char *server, int port, const char *commandTopic, const char *responseTopic)
     {
@@ -147,15 +147,15 @@ public:
      */
     bool isMessageValid(String message, String selfMachineId)
     {
-        // check if the message is valid
-        if (message.length() < 15)
+        String machineId = getValue(message, '#', 0);
+        String command = getValue(message, '#', 1);
+
+        if (command == "")
         {
             return false;
         }
 
-        // split the message by # and check if machine id is the same
-        String machineId = message.substring(0, 14);
-        return machineId != selfMachineId;
+        return selfMachineId == machineId;
     }
 
     /**

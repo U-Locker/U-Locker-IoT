@@ -151,6 +151,14 @@ void setup()
     }
   }
 
+  // LCD setup
+  int status = lcdScreen.setup();
+
+  if (!status)
+  {
+    Serial.println(F("[LCD]: LCD setup failed... Continuing... "));
+  }
+
   // Door Controller Setup
   doorHandler.setup();
 
@@ -201,7 +209,7 @@ void loop(void)
     Serial.println(uid);
 
     // if disconnected from mqtt
-    if (!mqttHandler.client.connected())
+    if (!client.connected())
     {
       // check from JSON state
       for (int i = 0; i < doorState.size(); i++)
@@ -209,6 +217,10 @@ void loop(void)
         String ktmUid = doorState[i]["ktmUid"];
         if (ktmUid == uid)
         {
+
+          // play buzz
+          buzzer.playBeep(3);
+
           int doorId = doorState[i]["doorId"];
           doorHandler.unlockDoor(doorId);
           break;
@@ -216,12 +228,12 @@ void loop(void)
       }
     }
 
-    // handle mqtt
-    mqttHandler.loop();
-
     // send response
     mqttHandler.sendResponse("NFC_READ", uid);
   }
+
+  // handle mqtt
+  mqttHandler.loop();
 
   // handle door controller
   doorHandler.loop();

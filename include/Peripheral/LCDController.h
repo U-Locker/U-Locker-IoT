@@ -1,9 +1,9 @@
 #include <hd44780.h>
-#include <hd44780ioClass/hd44780_I2Clcd.h>
+#include <hd44780ioClass/hd44780_I2Cexp.h>
 
 #include <constants.h>
 
-hd44780_I2Clcd lcd;
+hd44780_I2Cexp lcd;
 
 /**
  * @class LCDController
@@ -22,7 +22,9 @@ public:
     bool setup()
     {
         int status = lcd.begin(LCD_COLS, LCD_ROWS);
-        lcd.autoscroll();
+        lcd.clear();
+        lcd.setCursor(4, 2);
+        lcd.lineWrap();
         lcd.print("U-Locker IoT");
 
         return status;
@@ -45,6 +47,7 @@ public:
         if (millis() - lastLCDWrite >= LCD_SCREENTIME)
         {
             lcd.clear();
+            lcd.setCursor(4, 2);
             lcd.print("U-Locker IoT");
         }
     }

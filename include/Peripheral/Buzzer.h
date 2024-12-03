@@ -26,7 +26,7 @@ public:
         for (int i = 0; i < times; i++)
         {
             tone(BUZZER_PIN, BUZZER_FREQ, BUZZER_DELAY);
-            delay(BUZZER_DELAY);
+            delay(300);
         }
     }
 };
